@@ -1,0 +1,45 @@
+<?php
+
+declare(strict_types=1);
+
+namespace RobMellett\BigcommerceHttp\Requests\Storefront\Carts;
+
+use Saloon\Contracts\Body\HasBody;
+use Saloon\Enums\Method;
+use Saloon\Http\Request;
+use Saloon\Traits\Body\HasJsonBody;
+
+/**
+ * Delete a Cart line item. Removing the last line item deletes the Cart.
+ *
+ * @see https://developer.bigcommerce.com/docs/rest-storefront/carts/cart-items#delete-cart-line-item
+ */
+class DeleteCartLineItemRequest extends Request implements HasBody
+{
+    use HasJsonBody;
+
+    protected Method $method = Method::DELETE;
+
+    /**
+     * @param  array<string, mixed>  $payload  e.g. ['version' => 1]
+     */
+    public function __construct(
+        protected readonly string $cartId,
+        protected readonly string $itemId,
+        protected readonly array $payload = [],
+    ) {
+    }
+
+    public function resolveEndpoint(): string
+    {
+        return "/carts/{$this->cartId}/items/{$this->itemId}";
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function defaultBody(): array
+    {
+        return $this->payload;
+    }
+}

@@ -24,4 +24,9 @@ class BigcommerceHttpServiceProvider extends PackageServiceProvider
             ->hasMigration('create_bigcommerce_http_table')
             ->hasCommand(BigcommerceHttpCommand::class);
     }
+
+    public function packageRegistered(): void
+    {
+        $this->app->singleton(BigcommerceHttp::class);
+    }
 }
