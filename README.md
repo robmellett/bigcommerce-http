@@ -2123,6 +2123,111 @@ $response = BigcommerceHttp::management()->send(new DeleteChannelsMetafieldsRequ
 composer test
 ```
 
+### Mocking BigCommerce responses in your own tests
+
+Because every endpoint is a Saloon `Request` class, you never need to hit the real BigCommerce API (or a HTTP-level fake like Guzzle's mock handler) to test code that uses this package. Saloon ships a `MockClient` that intercepts requests per-connector or globally and returns canned `MockResponse`s instead.
+
+**Mocking a connector you construct directly**
+
+Attach the mock client to the connector instance with `withMockClient()`:
+
+```php
+use RobMellett\BigcommerceHttp\Connectors\ManagementApiConnector;
+use RobMellett\BigcommerceHttp\Requests\Management\Products\GetProductRequest;
+use Saloon\Http\Faking\MockClient;
+use Saloon\Http\Faking\MockResponse;
+
+$mockClient = new MockClient([
+    GetProductRequest::class => MockResponse::make(['data' => ['id' => 123, 'name' => 'Smith Journal 13']], 200),
+]);
+
+$connector = new ManagementApiConnector(storeHash: 'abc123', accessToken: 'token');
+$connector->withMockClient($mockClient);
+
+$response = $connector->send(new GetProductRequest(productId: 123));
+
+$product = $response->json('data'); // ['id' => 123, 'name' => 'Smith Journal 13']
+
+$mockClient->assertSent(GetProductRequest::class);
+```
+
+**Mocking the `BigcommerceHttp` facade / config-driven connectors**
+
+`BigcommerceHttp::management()` and `BigcommerceHttp::storefront()` build a fresh connector on every call, so there's nothing to call `withMockClient()` on ahead of time. Instead, register a *global* mock client — Saloon checks for one automatically on every connector and request. `MockClient::global()` only registers a client once per process (later calls are ignored), so reset it in `tearDown()` or it'll leak mocked responses into your next test:
+
+```php
+use RobMellett\BigcommerceHttp\Facades\BigcommerceHttp;
+use RobMellett\BigcommerceHttp\Requests\Management\Products\GetProductsRequest;
+use Saloon\Http\Faking\MockClient;
+use Saloon\Http\Faking\MockResponse;
+
+class ListsProductsTest extends TestCase
+{
+    protected function tearDown(): void
+    {
+        MockClient::destroyGlobal();
+
+        parent::tearDown();
+    }
+
+    public function test_it_lists_products_from_bigcommerce(): void
+    {
+        $mockClient = MockClient::global([
+            GetProductsRequest::class => MockResponse::make([
+                'data' => [
+                    ['id' => 123, 'name' => 'Smith Journal 13'],
+                ],
+            ], 200),
+        ]);
+
+        $response = BigcommerceHttp::management()->send(new GetProductsRequest());
+
+        $this->assertSame('Smith Journal 13', $response->json('data.0.name'));
+        $mockClient->assertSent(GetProductsRequest::class);
+    }
+}
+```
+
+**Matching by URL and asserting request contents**
+
+You can also key mock responses off a URL pattern (with wildcards) instead of a request class, and inspect the actual request that was sent — handy for asserting the payload your code built is correct. `assertSent()` accepts a closure typed against the request class, which receives the sent request instance:
+
+```php
+use RobMellett\BigcommerceHttp\Requests\Management\Products\GetProductRequest;
+use Saloon\Http\Faking\MockClient;
+use Saloon\Http\Faking\MockResponse;
+
+$mockClient = MockClient::global([
+    'api.bigcommerce.com/stores/*/v3/catalog/products/*' => MockResponse::make(['data' => ['id' => 123]], 200),
+]);
+
+// ...call code that sends a GetProductRequest...
+
+$mockClient->assertSent(function (GetProductRequest $request) {
+    return $request->resolveEndpoint() === '/catalog/products/123';
+});
+```
+
+**Simulating errors**
+
+Return a non-2xx `MockResponse` to exercise your error handling — both connectors throw on failure responses (see [Error handling](#error-handling)), so a mocked 404/422/500 will raise the same `Saloon\Exceptions\Request\...` exceptions your code catches in production:
+
+```php
+use Saloon\Http\Faking\MockClient;
+use Saloon\Http\Faking\MockResponse;
+use Saloon\Exceptions\Request\Statuses\NotFoundException;
+
+$mockClient = MockClient::global([
+    GetProductRequest::class => MockResponse::make(['title' => 'Not Found'], 404),
+]);
+
+$this->expectException(NotFoundException::class);
+
+BigcommerceHttp::management()->send(new GetProductRequest(productId: 999));
+```
+
+See Saloon's [testing documentation](https://docs.saloon.dev/testing/mocking-responses) for the full `MockClient`/`MockResponse` API, including sequenced responses, fixtures recorded from real requests, and more assertion helpers (`assertSentCount()`, `assertNotSent()`, `assertNothingSent()`, etc.).
+
 ## Changelog
 
 Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed recently.
